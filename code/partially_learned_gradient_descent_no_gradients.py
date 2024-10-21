@@ -1,4 +1,17 @@
 """Partially learned gradient descent without gradients as input."""
+"""
+    This Python script implements a partially learned gradient descent algorithm using TensorFlow for
+    iterative image reconstruction from projection data.
+    
+    :param validation: The `validation` parameter in the code is used to determine whether to generate a
+    set of random data for validation purposes or for training purposes. When `validation` is set to
+    `True`, the code generates data for validation by using the Shepp-Logan phantom in the ODL library.
+    This, defaults to False (optional)
+    :return: The code is a TensorFlow implementation of a partially learned
+    gradient descent algorithm without gradients as input for solving an inverse problem in computed
+    tomography. The code includes the definition of placeholders, variable definitions, an iterative
+    scheme, loss calculation, optimizer setup, and training/validation data generation.
+"""
 
 import tensorflow as tf
 import numpy as np
@@ -10,8 +23,7 @@ sess = tf.InteractiveSession()
 
 # Create ODL data structures
 size = 128
-space = odl.uniform_discr([-64, -64], [64, 64], [size, size],
-                          dtype='float32')
+space = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
 
 geometry = odl.tomo.parallel_beam_geometry(space, num_angles=30)
 operator = odl.tomo.RayTransform(space, geometry)

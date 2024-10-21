@@ -1,4 +1,17 @@
 """Partially learned gradient descent without regularizer as input."""
+"""
+The code implements a partially learned gradient descent algorithm without regularizer for solving
+an inverse problem using TensorFlow and ODL.
+
+:param validation: The `validation` parameter in the code is used to determine whether to generate a
+set of random data for validation purposes. When `validation` is set to `True`, the code generates a
+single set of data for validation. Otherwise, it generates multiple sets of random data for
+training, defaults to False (optional)
+:return: The code is a TensorFlow implementation of a partially learned gradient descent
+algorithm without a regularizer as input. It involves creating ODL (Operator Discretization Library)
+data structures, generating random data, defining placeholders and variables, implementing an
+iterative scheme, calculating loss, defining an optimizer, and training the network.
+"""
 
 import tensorflow as tf
 import numpy as np
@@ -10,8 +23,7 @@ sess = tf.InteractiveSession()
 
 # Create ODL data structures
 size = 128
-space = odl.uniform_discr([-64, -64], [64, 64], [size, size],
-                          dtype='float32')
+space = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
 
 geometry = odl.tomo.parallel_beam_geometry(space, num_angles=30)
 operator = odl.tomo.RayTransform(space, geometry)
@@ -23,10 +35,8 @@ operator = (1 / opnorm) * operator
 pseudoinverse = pseudoinverse * opnorm
 
 # Create tensorflow layer from odl operator
-odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator,
-                                                          'RayTransform')
-odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint,
-                                                                  'RayTransformAdjoint')
+odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator,'RayTransform')
+odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint, 'RayTransformAdjoint')
 
 # User selected paramters
 n_data = 20
@@ -150,15 +160,17 @@ if 0:
         x_arr, y_arr, x_true_arr = generate_data()
 
         _, loss_training = sess.run([optimizer, loss],
-                                  feed_dict={x_0: x_arr,
-                                             x_true: x_true_arr,
-                                             y: y_arr})
+                                feed_dict={x_0: x_arr,
+                                            x_true: x_true_arr,
+                                            y: y_arr})
 
         # Validate on shepp-logan
         x_values_result, loss_result = sess.run([x_values, loss],
-                       feed_dict={x_0: x_arr_validate,
-                                  x_true: x_true_arr_validate,
-                                  y: y_arr_validate})
+            feed_dict={x_0: x_arr_validate,
+                        x_true: x_true_arr_validate,
+                        y: y_arr_validate
+                    }
+        )
 
         print('iter={}, validation loss={}'.format(i, loss_result))
 
@@ -167,9 +179,9 @@ if 0:
 else:
     # Validate on shepp-logan
     x_values_result, loss_result = sess.run([x_values, loss],
-                   feed_dict={x_0: x_arr_validate,
-                              x_true: x_true_arr_validate,
-                              y: y_arr_validate})
+                feed_dict={x_0: x_arr_validate,
+                            x_true: x_true_arr_validate,
+                            y: y_arr_validate})
 
     print('validation loss={}'.format(loss_result))
 

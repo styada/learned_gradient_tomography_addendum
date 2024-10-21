@@ -1,38 +1,69 @@
 """Partially learned gradient descent scheme for ellipses."""
+"""
+The code implements a partially learned gradient descent scheme for ellipses using TensorFlow and
+ODL, with the ability to generate random data and validate the results.
+
+:param validation: The code seems to be a TensorFlow implementation for a partially
+learned gradient descent scheme for ellipses using ODL (Operator Discretization Library). The code
+includes the setup of ODL data structures, generation of random data, definition of placeholders and
+variables, implementation of the iterative scheme, loss, defaults to False (optional)
+:return:  The code defines a neural network model that iteratively updates an input image to minimize 
+the difference between the reconstructed image and the ground truth image. The model uses an ODL operator
+for forward and backward projections in tomography.
+"""
 
 import tensorflow as tf
 import numpy as np
 import odl
-import odl.contrib.tensorflow
 from util import random_phantom, conv2d
 
-sess = tf.InteractiveSession()
+sess = tf.compat.v1.InteractiveSession()
 
 # Create ODL data structures
+# The code snippet you provided is setting up the necessary structures for tomographic imaging using
+# the Operator Discretization Library (ODL) in Python. Here is a breakdown of what each line is doing:
 size = 128
-space = odl.uniform_discr([-64, -64], [64, 64], [size, size],
-                          dtype='float32')
 
-geometry = odl.tomo.parallel_beam_geometry(space, num_angles=30)
+# creating a uniform discretization grid in a 2D space using the Operator Discretization Library
+space = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
+
+# assigning the `parallel` attribute of the `odl.tomo.geometry` module to the variable `parallel`.
+parallel=odl.tomo.geometry.parallel
+
+# creating a geometry object for parallel beam projections in tomography with 30 angles
+geometry = parallel.parallel_beam_geometry(space, num_angles=30)
+
+# creating an instance of the `RayTransform`
 operator = odl.tomo.RayTransform(space, geometry)
+
+# creating a pseudoinverse operator using the Filtered Back Projection (FBP) method.
 pseudoinverse = odl.tomo.fbp_op(operator)
 
+
 # Ensure operator has fixed operator norm for scale invariance
+# calculating the operator norm of the given operator using the power method.
 opnorm = odl.power_method_opnorm(operator)
+
+# scaling the operator by a factor of `1 / opnorm`.
 operator = (1 / opnorm) * operator
+
+#  scaling the pseudoinverse operator by a factor of `opnorm`.
 pseudoinverse = pseudoinverse * opnorm
 
-# Create tensorflow layer from odl operator
-odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator,
-                                                          'RayTransform')
-odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint,
-                                                                  'RayTransformAdjoint')
 
+# Create tensorflow layer from odl operator
+# creating a TensorFlow layer from the ODL operator `operator` using the `as_tensorflow_layer` function
+odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator, 'RayTransform')
+
+#  creating a TensorFlow layer from the adjoint of the ODL operator
+odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint, 'RayTransformAdjoint')
+
+# creating instances of the `PartialDerivative` class for each axis
 partial0 = odl.PartialDerivative(space, axis=0)
 partial1 = odl.PartialDerivative(space, axis=1)
-odl_op_regularizer = odl.contrib.tensorflow.as_tensorflow_layer(partial0.adjoint * partial0 +
-                                                                partial1.adjoint * partial1,
-                                                                'Regularizer')
+
+# creating a TensorFlow layer from the regularization term defined by the sum of the squared partial derivatives along the two axes.
+odl_op_regularizer = odl.contrib.tensorflow.as_tensorflow_layer(partial0.adjoint * partial0 + partial1.adjoint * partial1, 'Regularizer')
 
 # User selected paramters
 n_data = 20
@@ -41,20 +72,39 @@ n_iter = 10
 
 
 def generate_data(validation=False):
-    """Generate a set of random data."""
+    """
+    The `generate_data` function creates a set of random data for training or validation purposes in a
+    medical imaging context.
+    
+    :param validation: The `validation` parameter is a boolean flag that determines whether to generate
+    data for validation purposes. If `validation` is set to `True`, the function will generate data for
+    validation by using a Shepp-Logan phantom. Otherwise, if `validation` is `False`, random phantom
+    data will, defaults to False (optional)
+    :return: The function `generate_data` returns three NumPy arrays: `x_arr`, `y_arr`, and
+    `x_true_arr`. These arrays contain generated random data for a given number of iterations.
+    """
     n_iter = 1 if validation else n_data
 
+    # initializing three NumPy arrays
     x_arr = np.empty((n_iter, space.shape[0], space.shape[1], 1), dtype='float32')
     y_arr = np.empty((n_iter, operator.range.shape[0], operator.range.shape[1], 1), dtype='float32')
     x_true_arr = np.empty((n_iter, space.shape[0], space.shape[1], 1), dtype='float32')
 
     for i in range(n_iter):
         if validation:
+            # If validation is true create shepp_logan phantoms
             phantom = odl.phantom.shepp_logan(space, True)
         else:
+            # If validation is false create random phantom with random ellipsoid phantoms
             phantom = random_phantom(space)
+        
+        #  applying the operator to the phantom. this operation represents the forward projection of the phantom image.
         data = operator(phantom)
+        
+        # adding white noise to the data obtained from the forward projection operation.
         noisy_data = data + odl.phantom.white_noise(operator.range) * np.mean(np.abs(data)) * 0.05
+        
+        # performing a filtered back projection (FBP) operation on the noisy data obtained from the forward projection.
         fbp = pseudoinverse(noisy_data)
 
         x_arr[i, ..., 0] = fbp
@@ -65,16 +115,19 @@ def generate_data(validation=False):
 
 
 with tf.name_scope('placeholders'):
+    # defining TensorFlow placeholders for input data in the neural network model.
     x_0 = tf.placeholder(tf.float32, shape=[None, size, size, 1], name="x_0")
     x_true = tf.placeholder(tf.float32, shape=[None, size, size, 1], name="x_true")
     y = tf.placeholder(tf.float32, shape=[None, operator.range.shape[0], operator.range.shape[1], 1], name="y")
 
+    # creating a TensorFlow tensor `s` filled with zeros of shape `[batch_size, size, size, n_memory]`.
     s = tf.fill([tf.shape(x_0)[0], size, size, n_memory], np.float32(0.0), name="s")
 
 
 with tf.name_scope('variable_definitions'):
     if 0:
         # Parameters if the network should be re-trained
+        # defining the weights and biases for a neural network model
         w1 = tf.get_variable("w1", shape=[3, 3, n_memory + 3, 32],
             initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=False, dtype=tf.float32))
         b1 = tf.Variable(tf.constant(0.01, shape=[1, 1, 1, 32]), name='b1')
@@ -88,6 +141,7 @@ with tf.name_scope('variable_definitions'):
         b3 = tf.Variable(tf.constant(0.00, shape=[1, 1, 1, n_memory + 1]), name='b3')
     else:
         # If trained network is available, re-use as starting guess
+        # loading pre-trained parameters for a neural network model from a NumPy zip file
         ld = np.load('partially_learned_gradient_descent_parameters.npz')
 
         w1 = tf.Variable(tf.constant(ld['w1']), name='w1')
@@ -130,12 +184,14 @@ with tf.name_scope('optimizer'):
     # Learning rate
     global_step = tf.Variable(0, trainable=False)
     starter_learning_rate = 1e-3
-    learning_rate = tf.train.inverse_time_decay(starter_learning_rate,
-                                                global_step=global_step,
-                                                decay_rate=1.0,
-                                                decay_steps=500,
-                                                staircase=True,
-                                                name='learning_rate')
+    learning_rate = tf.train.inverse_time_decay(
+        starter_learning_rate,
+        global_step=global_step,
+        decay_rate=1.0,
+        decay_steps=500,
+        staircase=True,
+        name='learning_rate'
+    )
 
     optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss, global_step=global_step)
 
@@ -156,15 +212,15 @@ if 0:
         x_arr, y_arr, x_true_arr = generate_data()
 
         _, loss_training = sess.run([optimizer, loss],
-                                  feed_dict={x_0: x_arr,
-                                             x_true: x_true_arr,
-                                             y: y_arr})
+                                feed_dict={x_0: x_arr,
+                                            x_true: x_true_arr,
+                                            y: y_arr})
 
         # Validate on shepp-logan
         x_values_result, loss_result = sess.run([x_values, loss],
-                       feed_dict={x_0: x_arr_validate,
-                                  x_true: x_true_arr_validate,
-                                  y: y_arr_validate})
+                    feed_dict={x_0: x_arr_validate,
+                                x_true: x_true_arr_validate,
+                                y: y_arr_validate})
 
         print('iter={}, validation loss={}'.format(i, loss_result))
 
@@ -173,9 +229,9 @@ if 0:
 else:
     # Validate on shepp-logan
     x_values_result, loss_result = sess.run([x_values, loss],
-                   feed_dict={x_0: x_arr_validate,
-                              x_true: x_true_arr_validate,
-                              y: y_arr_validate})
+                feed_dict={x_0: x_arr_validate,
+                            x_true: x_true_arr_validate,
+                            y: y_arr_validate})
 
     print('validation loss={}'.format(loss_result))
 

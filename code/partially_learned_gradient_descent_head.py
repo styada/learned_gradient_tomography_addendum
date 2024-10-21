@@ -2,6 +2,13 @@
 
 For legal reasons, we are sadly not able to provide the training data to the
 public, but we are working on providing an open dataset for validation.
+"""  
+"""
+    The code implements a partially learned gradient descent scheme for head data using TensorFlow and
+    ODL for tomography reconstruction.
+    :return: The code provided is a partially learned gradient descent scheme for head data using
+    TensorFlow and ODL (Operator Discretization Library). The code defines a neural network model that
+    iteratively updates an input image to minimize the loss function defined in the code.
 """
 
 import tensorflow as tf
@@ -15,8 +22,7 @@ sess = tf.InteractiveSession()
 
 # Create ODL data structures
 size = 512
-space = odl.uniform_discr([-128, -128], [128, 128], [size, size],
-                          dtype='float32')
+space = odl.uniform_discr([-128, -128], [128, 128], [size, size], dtype='float32')
 
 # Tomography
 # Make a fan beam geometry with flat detector
