@@ -1,19 +1,7 @@
-"""Partially learned gradient descent without regularizer as input."""
-"""
-The code implements a partially learned gradient descent algorithm without regularizer for solving
-an inverse problem using TensorFlow and ODL.
-
-:param validation: The `validation` parameter in the code is used to determine whether to generate a
-set of random data for validation purposes. When `validation` is set to `True`, the code generates a
-single set of data for validation. Otherwise, it generates multiple sets of random data for
-training, defaults to False (optional)
-:return: The code is a TensorFlow implementation of a partially learned gradient descent
-algorithm without a regularizer as input. It involves creating ODL (Operator Discretization Library)
-data structures, generating random data, defining placeholders and variables, implementing an
-iterative scheme, calculating loss, defining an optimizer, and training the network.
-"""
+"""Partially learned gradient descent scheme for ellipses."""
 
 import tensorflow.compat.v1 as tf
+
 import numpy as np
 import odl
 import odl.contrib.tensorflow
@@ -24,8 +12,10 @@ sess = tf.InteractiveSession()
 
 # Create ODL data structures
 size = 128
-space = odl.uniform_discr([-64, -64], [64, 64], [size, size], dtype='float32')
+space = odl.uniform_discr([-64, -64], [64, 64], [size, size],
+                        dtype='float32')
 
+# TODO: limited angles approach
 geometry = odl.tomo.parallel_beam_geometry(space, num_angles=30)
 operator = odl.tomo.RayTransform(space, geometry)
 pseudoinverse = odl.tomo.fbp_op(operator)
@@ -36,8 +26,18 @@ operator = (1 / opnorm) * operator
 pseudoinverse = pseudoinverse * opnorm
 
 # Create tensorflow layer from odl operator
-odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator,'RayTransform')
-odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint, 'RayTransformAdjoint')
+odl_op_layer = odl.contrib.tensorflow.as_tensorflow_layer(operator,
+                                                        'RayTransform')
+odl_op_layer_adjoint = odl.contrib.tensorflow.as_tensorflow_layer(operator.adjoint,
+                                                                'RayTransformAdjoint')
+
+partial0 = odl.PartialDerivative(space, axis=0)
+partial1 = odl.PartialDerivative(space, axis=1)
+
+# TODO: Different Regularization methods
+odl_op_regularizer = odl.contrib.tensorflow.as_tensorflow_layer(partial0.adjoint * partial0 +
+                                                                partial1.adjoint * partial1,
+                                                                'Regularizer')
 
 # User selected paramters
 n_data = 20
@@ -58,7 +58,6 @@ def generate_data(validation=False):
             phantom = odl.phantom.shepp_logan(space, True)
         else:
             phantom = random_phantom(space)
-
         data = operator(phantom)
         noisy_data = data + odl.phantom.white_noise(operator.range) * np.mean(np.abs(data)) * 0.05
         fbp = pseudoinverse(noisy_data)
@@ -81,7 +80,7 @@ with tf.name_scope('placeholders'):
 with tf.name_scope('variable_definitions'):
     if 0:
         # Parameters if the network should be re-trained
-        w1 = tf.get_variable("w1", shape=[3, 3, n_memory + 2, 32],
+        w1 = tf.get_variable("w1", shape=[3, 3, n_memory + 3, 32],
             initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=False, dtype=tf.float32))
         b1 = tf.Variable(tf.constant(0.01, shape=[1, 1, 1, 32]), name='b1')
 
@@ -94,7 +93,7 @@ with tf.name_scope('variable_definitions'):
         b3 = tf.Variable(tf.constant(0.00, shape=[1, 1, 1, n_memory + 1]), name='b3')
     else:
         # If trained network is available, re-use as starting guess
-        ld = np.load("code/partially_learned_gradient_descent_no_regularizer_parameters.npz")
+        ld = np.load("code/partially_learned_gradient_descent_parameters.npz")
 
         w1 = tf.Variable(tf.constant(ld['w1']), name='w1')
         b1 = tf.Variable(tf.constant(ld['b1']), name='b1')
@@ -102,35 +101,33 @@ with tf.name_scope('variable_definitions'):
         w2 = tf.Variable(tf.constant(ld['w2']), name='w2')
         b2 = tf.Variable(tf.constant(ld['b2']), name='b2')
 
+    # TODO: Adding more layers to the neural network
         w3 = tf.Variable(tf.constant(ld['w3']), name='w3')
         b3 = tf.Variable(tf.constant(ld['b3']), name='b3')
 
-@tf.function
-def iterative_scheme(x_0, y, n_iter, s, w1, b1, w2, b2, w3, b3):
-    # Implementation of the iterative scheme
-    x_values = [x_0]
-    x = x_0
-    for i in range(n_iter):
-        with tf.name_scope(f'iterate_{i}'):
-            # Compute the adjoint gradient
-            gradx = odl_op_layer_adjoint(odl_op_layer(x) - y)
 
-            # Concatenate and process updates
-            update = tf.concat([x, gradx, s], axis=3)
+# Implementation of the iterative scheme
+x_values = [x_0]
+x = x_0
+for i in range(n_iter):
+    with tf.name_scope(f'iterate_{i}'):
+        gradx = odl_op_layer_adjoint(odl_op_layer(x) - y)
+        gradreg = odl_op_regularizer(x)
 
-            # Apply convolutions and activations
-            update = tf.nn.relu(conv2d(update, w1) + b1)
-            update = tf.nn.relu(conv2d(update, w2) + b2)
-            update = conv2d(update, w3) + b3
+        update = tf.concat([x, gradx, gradreg, s], axis=3)
 
-            # Split the update into s and dx
-            s = tf.nn.relu(update[..., 1:])
-            dx = update[..., 0:1]
+        # TODO: look into different activation relu
+        update = tf.nn.relu(conv2d(update, w1) + b1)
+        update = tf.nn.relu(conv2d(update, w2) + b2)
 
-            # Update x
-            x = x + dx
-            x_values.append(x)
-    return x_values, x
+        update = conv2d(update, w3) + b3
+
+        s = tf.nn.relu(update[..., 1:])
+        dx = update[..., 0:1]
+
+        x = x + dx
+        x_values.append(x)
+
 
 with tf.name_scope('loss'):
     loss = tf.reduce_mean(tf.reduce_sum((x - x_true) ** 2, axis=(1, 2)))
@@ -172,11 +169,9 @@ if 0:
 
         # Validate on shepp-logan
         x_values_result, loss_result = sess.run([x_values, loss],
-            feed_dict={x_0: x_arr_validate,
-                        x_true: x_true_arr_validate,
-                        y: y_arr_validate
-                    }
-        )
+                    feed_dict={x_0: x_arr_validate,
+                                x_true: x_true_arr_validate,
+                                y: y_arr_validate})
 
         print('iter={}, validation loss={}'.format(i, loss_result))
 
@@ -186,8 +181,9 @@ else:
     # Validate on shepp-logan
     x_values_result, loss_result = sess.run([x_values, loss],
                 feed_dict={x_0: x_arr_validate,
-                            x_true: x_true_arr_validate,
-                            y: y_arr_validate})
+                                x_true: x_true_arr_validate,
+                                y: y_arr_validate
+                            })
 
     print('validation loss={}'.format(loss_result))
 

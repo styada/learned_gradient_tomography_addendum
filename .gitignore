@@ -91,3 +91,6 @@ target/
 .ipynb_checkpoints
 
 # Documentation build files
+
+*.DS_Store
+.DS_Store

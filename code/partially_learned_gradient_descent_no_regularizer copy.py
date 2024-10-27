@@ -13,14 +13,11 @@ data structures, generating random data, defining placeholders and variables, im
 iterative scheme, calculating loss, defining an optimizer, and training the network.
 """
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import numpy as np
 import odl
 import odl.contrib.tensorflow
 from util import random_phantom, conv2d
-
-tf.disable_v2_behavior()
-sess = tf.InteractiveSession()
 
 # Create ODL data structures
 size = 128
@@ -44,14 +41,19 @@ n_data = 20
 n_memory = 5
 n_iter = 10
 
+# Remove the placeholders and directly use variables for your data
+x_0 = tf.Variable(tf.zeros([None, size, size, 1]), dtype=tf.float32, name="x_0")
+x_true = tf.Variable(tf.zeros([None, size, size, 1]), dtype=tf.float32, name="x_true")
+y = tf.Variable(tf.zeros([None, operator.range.shape[0], operator.range.shape[1], 1]), dtype=tf.float32, name="y")
+s = tf.Variable(tf.zeros([size, size, n_memory]), trainable=False)
 
 def generate_data(validation=False):
     """Generate a set of random data."""
     n_iter = 1 if validation else n_data
 
-    x_arr = np.empty((n_iter, space.shape[0], space.shape[1], 1), dtype='float32')
-    y_arr = np.empty((n_iter, operator.range.shape[0], operator.range.shape[1], 1), dtype='float32')
-    x_true_arr = np.empty((n_iter, space.shape[0], space.shape[1], 1), dtype='float32')
+    x_arr = np.zeros((n_iter, space.shape[0], space.shape[1], 1), dtype=np.float32)
+    y_arr = np.zeros((n_iter, operator.range.shape[0], operator.range.shape[1], 1), dtype=np.float32)
+    x_true_arr = np.zeros((n_iter, space.shape[0], space.shape[1], 1), dtype=np.float32)
 
     for i in range(n_iter):
         if validation:
@@ -69,28 +71,23 @@ def generate_data(validation=False):
 
     return x_arr, y_arr, x_true_arr
 
-
-with tf.name_scope('placeholders'):
-    x_0 = tf.placeholder(tf.float32, shape=[None, size, size, 1], name="x_0")
-    x_true = tf.placeholder(tf.float32, shape=[None, size, size, 1], name="x_true")
-    y = tf.placeholder(tf.float32, shape=[None, operator.range.shape[0], operator.range.shape[1], 1], name="y")
-
-    s = tf.fill([tf.shape(x_0)[0], size, size, n_memory], np.float32(0.0), name="s")
-
+new_params = False
 
 with tf.name_scope('variable_definitions'):
-    if 0:
+    if new_params:
+        """
+        Initialization with Keras Initializers: 
+        The tf.keras.initializers.GlorotUniform() is used to replace tf.contrib.layers.xavier_initializer_conv2d, 
+        providing a more straightforward way to initialize weights.
+        """
         # Parameters if the network should be re-trained
-        w1 = tf.get_variable("w1", shape=[3, 3, n_memory + 2, 32],
-            initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=False, dtype=tf.float32))
+        w1 = tf.Variable(tf.keras.initializers.GlorotUniform()(shape=[3, 3, n_memory + 2, 32]), name='w1')
         b1 = tf.Variable(tf.constant(0.01, shape=[1, 1, 1, 32]), name='b1')
 
-        w2 = tf.get_variable("w2", shape=[3, 3, 32, 32],
-            initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=False, dtype=tf.float32))
+        w2 = tf.Variable(tf.keras.initializers.GlorotUniform()(shape=[3, 3, 32, 32]), name='w2')
         b2 = tf.Variable(tf.constant(0.01, shape=[1, 1, 1, 32]), name='b2')
 
-        w3 = tf.get_variable("w3", shape=[3, 3, 32, n_memory + 1],
-            initializer=tf.contrib.layers.xavier_initializer_conv2d(uniform=False, dtype=tf.float32))
+        w3 = tf.Variable(tf.keras.initializers.GlorotUniform()(shape=[3, 3, 32, n_memory + 1]), name='w3')
         b3 = tf.Variable(tf.constant(0.00, shape=[1, 1, 1, n_memory + 1]), name='b3')
     else:
         # If trained network is available, re-use as starting guess
@@ -104,7 +101,7 @@ with tf.name_scope('variable_definitions'):
 
         w3 = tf.Variable(tf.constant(ld['w3']), name='w3')
         b3 = tf.Variable(tf.constant(ld['b3']), name='b3')
-
+    
 @tf.function
 def iterative_scheme(x_0, y, n_iter, s, w1, b1, w2, b2, w3, b3):
     # Implementation of the iterative scheme
@@ -132,26 +129,34 @@ def iterative_scheme(x_0, y, n_iter, s, w1, b1, w2, b2, w3, b3):
             x_values.append(x)
     return x_values, x
 
-with tf.name_scope('loss'):
-    loss = tf.reduce_mean(tf.reduce_sum((x - x_true) ** 2, axis=(1, 2)))
+@tf.function
+def validate_step(x_arr_validate, y_arr_validate, x_true_arr_validate):
+    # Get predictions using iterative_scheme
+    x_pred = iterative_scheme(x_0, y_arr_validate, n_iter, s, w1, b1, w2, b2, w3, b3)[-1]
+    # Compute loss
+    loss_result = tf.reduce_mean(tf.reduce_sum((x_pred - x_true_arr_validate) ** 2, axis=(1, 2)))
+    
+    return x_pred, loss_result
 
+# Learning rate
+global_step = tf.Variable(0, trainable=False)
+starter_learning_rate = 1e-3
+learning_rate = tf.train.inverse_time_decay(starter_learning_rate,
+                                            global_step=global_step,
+                                            decay_rate=1.0,
+                                            decay_steps=500,
+                                            staircase=True,
+                                            name='learning_rate')
 
-with tf.name_scope('optimizer'):
-    # Learning rate
-    global_step = tf.Variable(0, trainable=False)
-    starter_learning_rate = 1e-3
-    learning_rate = tf.train.inverse_time_decay(starter_learning_rate,
-                                                global_step=global_step,
-                                                decay_rate=1.0,
-                                                decay_steps=500,
-                                                staircase=True,
-                                                name='learning_rate')
+# Create a learning rate schedule
+learning_rate_schedule = tf.keras.optimizers.schedules.InverseTimeDecay(
+    starter_learning_rate,
+    decay_steps=500,
+    decay_rate=1.0
+)
 
-    optimizer = tf.train.RMSPropOptimizer(learning_rate).minimize(loss, global_step=global_step)
-
-
-# Initialize all TF variables
-tf.global_variables_initializer().run()
+# Define the optimizer using Keras
+optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate_schedule)
 
 # Solve with an ODL callback to see what happens in real time
 callback = odl.solvers.CallbackShow(clim=[0.1, 0.4])
@@ -159,37 +164,35 @@ callback = odl.solvers.CallbackShow(clim=[0.1, 0.4])
 # Generate validation data
 x_arr_validate, y_arr_validate, x_true_arr_validate = generate_data(validation=True)
 
-if 0:
+new_train = False
+
+if new_train:
     # Train the network
-    n_train = 100000
-    for i in range(0, n_train):
+    n_train = 10
+    for i in range(n_train):
         x_arr, y_arr, x_true_arr = generate_data()
 
-        _, loss_training = sess.run([optimizer, loss],
-                                feed_dict={x_0: x_arr,
-                                            x_true: x_true_arr,
-                                            y: y_arr})
+        # Use GradientTape to record operations
+        with tf.GradientTape() as tape:
+            x_pred = iterative_scheme(x_0, y_arr, n_iter, s, w1, b1, w2, b2, w3, b3)[-1]  # Adjust as needed
+            loss_training = tf.reduce_mean(tf.reduce_sum((x_pred - x_true_arr) ** 2, axis=(1, 2))) # Compute the loss
+
+        gradients = tape.gradient(loss_training, [w1, w2, w3, b1, b2, b3])  # Compute gradients including any trainable variables
+        optimizer.apply_gradients(zip(gradients, [w1, w2, w3, b1, b2, b3])) # Update weights
 
         # Validate on shepp-logan
-        x_values_result, loss_result = sess.run([x_values, loss],
-            feed_dict={x_0: x_arr_validate,
-                        x_true: x_true_arr_validate,
-                        y: y_arr_validate
-                    }
+        x_values_result, loss_result = validate_step(x_arr_validate, y_arr_validate, x_true_arr_validate)  # Validate
+
+        print(
+            f'iter={i}, training loss={loss_training.numpy()} validation loss={loss_result.numpy()}'
         )
 
-        print('iter={}, validation loss={}'.format(i, loss_result))
-
-        callback((space ** (n_iter + 1)).element(
-            [xv.squeeze() for xv in x_values_result]))
+        callback((space ** (n_iter + 1)).element([xv.squeeze() for xv in x_values_result]))
 else:
     # Validate on shepp-logan
-    x_values_result, loss_result = sess.run([x_values, loss],
-                feed_dict={x_0: x_arr_validate,
-                            x_true: x_true_arr_validate,
-                            y: y_arr_validate})
+    x_values_result, loss_result = [x_values, loss], feed_dict={x_0: x_arr_validate, x_true: x_true_arr_validate, y: y_arr_validate}
 
-    print('validation loss={}'.format(loss_result))
+    print(f'validation loss={loss_result}')
 
     callback((space ** (n_iter + 1)).element(
         [xv.squeeze() for xv in x_values_result]))
