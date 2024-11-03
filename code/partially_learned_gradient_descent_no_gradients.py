@@ -13,12 +13,14 @@
     scheme, loss calculation, optimizer setup, and training/validation data generation.
 """
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import numpy as np
 import odl
 import odl.contrib.tensorflow
 from util import random_phantom, conv2d
-
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+tf.disable_v2_behavior()
 sess = tf.InteractiveSession()
 
 # Create ODL data structures
@@ -89,7 +91,7 @@ with tf.name_scope('variable_definitions'):
         b3 = tf.Variable(tf.constant(0.00, shape=[1, 1, 1, n_memory + 1]), name='b3')
     else:
         # If trained network is available, re-use as starting guess
-        ld = np.load('partially_learned_gradient_descent_no_gradients_parameters.npz')
+        ld = np.load('code/partially_learned_gradient_descent_no_gradients_parameters.npz')
 
         w1 = tf.Variable(tf.constant(ld['w1']), name='w1')
         b1 = tf.Variable(tf.constant(ld['b1']), name='b1')
