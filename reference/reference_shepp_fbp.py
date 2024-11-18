@@ -17,7 +17,7 @@ geometry = odl.tomo.parallel_beam_geometry(space, num_angles=30)
 operator = odl.tomo.RayTransform(space, geometry)
 
 # Create pseudoinverse
-pseudoinverse = odl.tomo.fbp_op(operator, filter_type='Hann')
+pseudoinverse = odl.tomo.fbp_op(operator)
 
 
 # --- Generate artificial data --- #
